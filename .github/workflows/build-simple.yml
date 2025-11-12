@@ -1,0 +1,157 @@
+name: Build Verification (Self-Hosted)
+
+# This workflow is designed for self-hosted runners with Unreal Engine pre-installed
+# GitHub-hosted runners do not include UE and installation is complex/time-consuming
+# For production use, set up a self-hosted Windows runner with UE 5.3+ installed
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  PROJECT_NAME: 'PocketStriker'
+  BUILD_CONFIG: 'Development Editor'
+
+jobs:
+  # Syntax and structure validation (runs on GitHub-hosted runners)
+  validate:
+    name: Validate Project Structure
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      
+    - name: Validate Project Files
+      shell: pwsh
+      run: |
+        Write-Host "Validating project structure..."
+        
+        # Check required files exist
+        $requiredFiles = @(
+          "${{ env.PROJECT_NAME }}.uproject",
+          "Source/${{ env.PROJECT_NAME }}/${{ env.PROJECT_NAME }}.Build.cs",
+          "Source/${{ env.PROJECT_NAME }}.Target.cs",
+          "Source/${{ env.PROJECT_NAME }}Editor.Target.cs"
+        )
+        
+        $allValid = $true
+        foreach ($file in $requiredFiles) {
+          if (Test-Path $file) {
+            Write-Host "✓ Found: $file"
+          } else {
+            Write-Host "✗ Missing: $file"
+            $allValid = $false
+          }
+        }
+        
+        if (-not $allValid) {
+          Write-Host "::error::Required project files are missing"
+          exit 1
+        }
+        
+        Write-Host "✓ Project structure validation passed"
+        
+    - name: Validate JSON Files
+      shell: pwsh
+      run: |
+        Write-Host "Validating JSON syntax..."
+        
+        $jsonFiles = Get-ChildItem -Recurse -Filter "*.uproject" -File
+        $jsonFiles += Get-ChildItem -Recurse -Filter "*.uplugin" -File
+        
+        foreach ($file in $jsonFiles) {
+          try {
+            $content = Get-Content $file.FullName -Raw | ConvertFrom-Json
+            Write-Host "✓ Valid JSON: $($file.Name)"
+          } catch {
+            Write-Host "✗ Invalid JSON: $($file.Name)"
+            Write-Host "::error::$($_.Exception.Message)"
+            exit 1
+          }
+        }
+        
+        Write-Host "✓ JSON validation passed"
+        
+    - name: Check for Common Issues
+      shell: pwsh
+      run: |
+        Write-Host "Checking for common issues..."
+        
+        # Check for large files that shouldn't be committed
+        $largeFiles = Get-ChildItem -Recurse -File | Where-Object { 
+          $_.Length -gt 100MB -and 
+          $_.Extension -notin @('.uasset', '.umap') 
+        }
+        
+        if ($largeFiles) {
+          Write-Host "::warning::Large files detected (>100MB):"
+          $largeFiles | ForEach-Object { Write-Host "  - $($_.FullName) ($([math]::Round($_.Length/1MB, 2)) MB)" }
+        }
+        
+        # Check for TODO/FIXME comments in C++ files
+        $cppFiles = Get-ChildItem -Path "Source" -Recurse -Filter "*.cpp" -File
+        $todoCount = 0
+        foreach ($file in $cppFiles) {
+          $content = Get-Content $file.FullName -Raw
+          if ($content -match "TODO|FIXME") {
+            $todoCount++
+          }
+        }
+        
+        if ($todoCount -gt 0) {
+          Write-Host "::notice::Found $todoCount C++ files with TODO/FIXME comments"
+        }
+        
+        Write-Host "✓ Common issues check completed"
+
+  # Actual build (requires self-hosted runner with UE installed)
+  build:
+    name: Build Project (Self-Hosted)
+    runs-on: self-hosted
+    # Remove the line above and uncomment below to skip on GitHub-hosted runners
+    # runs-on: windows-latest
+    if: false  # Set to true when self-hosted runner is available
+    needs: validate
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+        
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3
+      
+    - name: Generate Project Files
+      shell: pwsh
+      run: |
+        # Assumes UE is installed and in PATH on self-hosted runner
+        $ubtPath = (Get-Command UnrealBuildTool -ErrorAction SilentlyContinue).Source
+        if (-not $ubtPath) {
+          Write-Host "::error::UnrealBuildTool not found in PATH"
+          exit 1
+        }
+        
+        & $ubtPath -projectfiles -project="$PWD\${{ env.PROJECT_NAME }}.uproject" -game -engine
+        
+    - name: Build Project
+      shell: pwsh
+      run: |
+        msbuild "${{ env.PROJECT_NAME }}.sln" `
+          /t:Build `
+          /p:Configuration="${{ env.BUILD_CONFIG }}" `
+          /p:Platform=Win64 `
+          /m `
+          /v:minimal
+          
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v3
+      if: success()
+      with:
+        name: build-${{ github.sha }}
+        path: Binaries/Win64/
+        retention-days: 7

@@ -1,0 +1,145 @@
+name: Build PocketStriker
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  UE_VERSION: '5.3'
+  PROJECT_NAME: 'PocketStriker'
+
+jobs:
+  build:
+    name: Build Unreal Engine Project
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+      with:
+        lfs: true
+        
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1.3
+      
+    - name: Cache Unreal Engine
+      id: cache-ue
+      uses: actions/cache@v3
+      with:
+        path: |
+          C:\Program Files\Epic Games\UE_${{ env.UE_VERSION }}
+        key: ue-${{ env.UE_VERSION }}-${{ runner.os }}
+        restore-keys: |
+          ue-${{ env.UE_VERSION }}-
+          
+    - name: Install Unreal Engine
+      if: steps.cache-ue.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        Write-Host "Note: Unreal Engine installation requires Epic Games account"
+        Write-Host "For CI/CD, consider using a self-hosted runner with UE pre-installed"
+        Write-Host "or using Epic's official UE Docker images"
+        Write-Host "Skipping automated UE installation - requires manual setup"
+        
+    - name: Verify Unreal Engine Installation
+      shell: pwsh
+      run: |
+        $uePath = "C:\Program Files\Epic Games\UE_${{ env.UE_VERSION }}"
+        if (Test-Path $uePath) {
+          Write-Host "Unreal Engine ${{ env.UE_VERSION }} found at: $uePath"
+        } else {
+          Write-Host "::warning::Unreal Engine not found. Please use self-hosted runner with UE installed."
+          exit 1
+        }
+        
+    - name: Generate Visual Studio Project Files
+      shell: pwsh
+      run: |
+        $ubtPath = "C:\Program Files\Epic Games\UE_${{ env.UE_VERSION }}\Engine\Build\BatchFiles\Build.bat"
+        if (Test-Path $ubtPath) {
+          & $ubtPath -projectfiles -project="$PWD\${{ env.PROJECT_NAME }}.uproject" -game -engine
+        } else {
+          Write-Host "::error::UnrealBuildTool not found"
+          exit 1
+        }
+        
+    - name: Build Development Editor Configuration
+      shell: pwsh
+      run: |
+        $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+        if (-not (Test-Path $msbuild)) {
+          $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe"
+        }
+        if (-not (Test-Path $msbuild)) {
+          $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+        }
+        
+        if (Test-Path $msbuild) {
+          & $msbuild "${{ env.PROJECT_NAME }}.sln" /t:Build /p:Configuration="Development Editor" /p:Platform=Win64 /m /v:minimal
+        } else {
+          Write-Host "::error::MSBuild not found"
+          exit 1
+        }
+        
+    - name: Build Development Configuration
+      shell: pwsh
+      run: |
+        $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Current\Bin\MSBuild.exe"
+        if (-not (Test-Path $msbuild)) {
+          $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Current\Bin\MSBuild.exe"
+        }
+        if (-not (Test-Path $msbuild)) {
+          $msbuild = "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Current\Bin\MSBuild.exe"
+        }
+        
+        if (Test-Path $msbuild) {
+          & $msbuild "${{ env.PROJECT_NAME }}.sln" /t:Build /p:Configuration=Development /p:Platform=Win64 /m /v:minimal
+        } else {
+          Write-Host "::error::MSBuild not found"
+          exit 1
+        }
+        
+    - name: Verify Build Outputs
+      shell: pwsh
+      run: |
+        $editorDll = "Binaries\Win64\UnrealEditor-${{ env.PROJECT_NAME }}.dll"
+        $gameDll = "Binaries\Win64\${{ env.PROJECT_NAME }}.exe"
+        
+        if (Test-Path $editorDll) {
+          Write-Host "✓ Editor build successful: $editorDll"
+        } else {
+          Write-Host "::error::Editor build failed - DLL not found"
+          exit 1
+        }
+        
+        if (Test-Path $gameDll) {
+          Write-Host "✓ Game build successful: $gameDll"
+        } else {
+          Write-Host "::warning::Game executable not found (may be expected for some configurations)"
+        }
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v3
+      if: success()
+      with:
+        name: build-artifacts-${{ github.sha }}
+        path: |
+          Binaries/Win64/*.dll
+          Binaries/Win64/*.exe
+        retention-days: 7
+        
+    - name: Build Summary
+      if: always()
+      shell: pwsh
+      run: |
+        Write-Host "========================================="
+        Write-Host "Build Summary"
+        Write-Host "========================================="
+        Write-Host "Project: ${{ env.PROJECT_NAME }}"
+        Write-Host "UE Version: ${{ env.UE_VERSION }}"
+        Write-Host "Commit: ${{ github.sha }}"
+        Write-Host "Branch: ${{ github.ref_name }}"
+        Write-Host "========================================="
