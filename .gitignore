@@ -1,0 +1,69 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.sln.docstates
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+
+# Unreal Engine
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+*.sln
+*.xcodeproj
+*.xcworkspace
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+*.ipa
+
+# Unreal Engine specific
+*.opensdf
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+
+# Starter Content (optional, uncomment if not needed)
+# Content/StarterContent/
+
+# Cache files
+*.uasset
+*.umap
+!Content/**/*.uasset
+!Content/**/*.umap
+
+# Ignore all files in Plugins except .uplugin
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# OS specific
+.DS_Store
+Thumbs.db
